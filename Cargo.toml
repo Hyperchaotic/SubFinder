@@ -1,0 +1,18 @@
+[package]
+name = "sub_finder"
+version = "0.1.0"
+authors = ["hyperchaotic"]
+
+[dependencies.rust-xmlrpc]
+git = "https://github.com/hyperchaotic/rust-xmlrpc.git"
+
+[dependencies]
+rustc-serialize = "0.3"
+byteorder = "0.3"
+zip = "0.1.11"
+hyper = "0.6.15"
+docopt = "0.6"
+
+[lib]
+name = "sub_finder"
+path = "src/lib.rs"
