@@ -113,7 +113,7 @@ impl OpenSubtitlesClient {
 #[test]
 fn test_bad_login() {
     let res = OpenSubtitlesClient::create_client("fakeuser", "fakepassword", "fakelang", "qwe");
-    assert_eq!(res.err().unwrap(), ClientError::InvalidCredentials);
+    assert_eq!(res.err().unwrap(), SubError::InvalidCredentials);
 }
 
 #[test]
