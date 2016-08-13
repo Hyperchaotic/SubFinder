@@ -1,16 +1,19 @@
 extern crate sub_finder;
+extern crate glob;
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
 use std::{env, mem, thread, fs};
 use std::sync::{Arc, Mutex, mpsc};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::result::Result;
 use std::collections::HashSet;
 
 use sub_finder::error::SubError;
 use sub_finder::client;
 use sub_finder::file_utils;
+
+use glob::glob;
 
 /// Opensubtitle hashing algorithm [hash file size]+[first 64KB]+[last64KB]
 const HASH_BLK_SIZE: u64 = 65536;
@@ -134,24 +137,21 @@ fn run_workers(shows: Vec<Show>, language: String) {
 }
 
 /// Traverse directory for valid movies
-fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<Show>, std::io::Error> {
-    let files = try!(fs::read_dir(path));
-    let mut show_list: Vec<Show> = Vec::new();
+fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<Show>, SubError> {
 
-    // Process entries. If we fail with an entry
-    // we want to drop and continue with the rest.
-    for file in files {
-        if let Ok(file) = file {
+    let mut show_list: Vec<Show> = Vec::new();
+    for entry in try!(glob(&path)) {
+        if let Ok(path) = entry {
 
             // Only accept files big enough for hashing (error discerning file size
             // interpreted as 0 size file for discarding entry)
-            let fsize = fs::metadata(file.path()).map(|i| i.len()).unwrap_or(0);
-            let ext = file.path().extension().unwrap_or_default().to_string_lossy().into_owned();
+            let fsize = fs::metadata(&path).map(|i| i.len()).unwrap_or(0);
+            let ext = path.extension().unwrap_or_default().to_string_lossy().into_owned();
             if valid_extensions.contains(ext.as_str()) && fsize >= HASH_BLK_SIZE {
-                if let Ok(unicode_name) = file.file_name().into_string() {
+                if let Some(unicode_name) = path.file_name() {
                     show_list.push(Show {
-                        full_path: file.path().to_string_lossy().into_owned(),
-                        file_name: unicode_name,
+                        full_path: path.to_string_lossy().into_owned(),
+                        file_name: unicode_name.to_string_lossy().into_owned(),
                         file_size: fsize,
                         hash: String::new(),
                     });
@@ -159,17 +159,16 @@ fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<S
             }
         }
     }
+
     Ok(show_list)
 }
 
 fn main() {
     let language;
-    let mut dir = "./".to_string();
+    let mut dir = "*".to_string();
 
-    // A bit ugly, but if first argument is three characters, assumed to be language selection
-    // don't put a three character filename/directory!
-    let arg1 = env::args().nth(1).unwrap_or("./".to_string());
-    if arg1.len()==3 {
+    let arg1 = env::args().nth(1).unwrap_or("*".to_string());
+    if arg1.len()==3 && !arg1.contains("*") && !arg1.contains(".") {
         language = arg1;
     } else {
         dir = arg1;
@@ -177,53 +176,23 @@ fn main() {
     }
 
     println!("SubFinder 0.1.0");
-    println!("Usage: SubFinder <dir/filename> <lang>. Default is ./ eng.");
+    println!("Usage: SubFinder <dir/filename> <lang>. Default is \"SubFinder * eng\".");
     println!("Finding subtitles for {}  Language: {}.\n", dir, language);
 
     // Common file extensions for movies. Put into HashSet for O(1) lookup.
     let extensions = vec!("avi", "mp4", "m4v", "mpg", "mkv", "264", "h264", "265", "h265");
     let valid_extensions: HashSet<&str> = extensions.into_iter().collect();
 
-    let mut shows: Vec<Show> = Vec::new();
-
-    // If argument is a single file, do the eligibility checks and put it in list, otherwise
-    // call function to scan directory for files.
-    let metadata = fs::metadata(&dir);
-    match metadata {
-        Ok(m) => {
-            let path = Path::new(&dir);
-            if m.is_file() {
-                let ext = path.extension().unwrap_or_default().to_string_lossy().into_owned();
-                if m.len()>=HASH_BLK_SIZE && valid_extensions.contains(ext.as_str()) {
-                    shows.push(Show {
-                        full_path: dir.clone(),
-                        file_name: path.file_name().unwrap().to_string_lossy().into_owned(),
-                        file_size: m.len(),
-                        hash: String::new(),
-                    });
-                } else {
-                    println!("Error: Invalid file.");
-                    return;
-                }
-            } else {
-                match get_show_list(dir.clone(), &valid_extensions) {
-                    Err(e) => {
-                        println!("Error: {} reading directory!", e);
-                        return;
-                    },
-                    Ok(vec) => shows = vec,
-                }
-            }
-        },
+    match get_show_list(dir, &valid_extensions) {
         Err(e) => {
-            println!("Error: {} reading file/directory!", e);
+            println!("Error: {} reading directory!", e);
             return;
+        },
+        Ok(vec) => {
+            if vec.len()>0 {
+                run_workers(vec, language);
+            }
         }
-    }
-
-    // Do the actual work
-    if shows.len()>0 {
-        run_workers(shows, language);
     }
 
     println!("All done.");
