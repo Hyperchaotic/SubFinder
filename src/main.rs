@@ -1,13 +1,16 @@
 extern crate sub_finder;
 extern crate glob;
+extern crate config;
+extern crate crossbeam;
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, BufReader};
-use std::{env, mem, thread, fs};
-use std::sync::{Arc, Mutex, mpsc};
+use std::{env, mem, fs};
+use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 use std::result::Result;
 use std::collections::HashSet;
+use crossbeam::scope;
 
 use sub_finder::error::SubError;
 use sub_finder::client;
@@ -20,6 +23,11 @@ const HASH_BLK_SIZE: u64 = 65536;
 
 // Number of threads hashing and retrieving subtitles. Don't flood server pls.
 const THREAD_COUNT: u64 = 4;
+
+const CONFIG_DIR: &'static str = ".subfinder";
+const CONFIG_FILENAME: &'static str = "subfinder.conf";
+const CONFIG_STR_USER: &'static str = "username";
+const CONFIG_STR_PASS: &'static str = "password";
 
 /// Represent a single movie file in need of subtitles
 struct Show {
@@ -68,10 +76,15 @@ impl Show {
     }
 
     // Look for and retrieve subtitle ZIP from opensubtitles.org and unpack to .SRT file.
-    fn get_subtitles(&self, language: &String) -> Result<(), SubError> {
+    fn get_subtitles(&self, params: & UserParams) -> Result<(), SubError> {
         let client =
-            try!(client::OpenSubtitlesClient::create_client("", "", "en", "RustSubFinder 0.1.0"));
-        let subs = try!(client.search_subtitles(&self.hash, self.file_size, language));
+            try!(client::OpenSubtitlesClient::create_client(&params.username,
+                        //&params.password, "en", "OSTestUserAgent"));
+                        &params.password, "en", "RustSubFinder 0.1.0"));
+
+
+
+        let subs = try!(client.search_subtitles(&self.hash, self.file_size, &params.language));
 
         if subs.is_empty() {
             return Err(SubError::SvrNoSubtitlesFound);
@@ -88,61 +101,54 @@ impl Show {
 /// Start a number of worker threads to consume the list of files,
 /// creates hashes and get subtitle files from server.
 /// Every worker get access to the shared Vec through a critical section.
-fn run_workers(shows: Vec<Show>, language: String) {
-    let data = Arc::new(Mutex::new(shows));
+fn run_workers(shows: Vec<Show>, params: UserParams) {
 
-    let (tx, rx) = mpsc::channel();
-    let lang_arc = Arc::new(language); // using Arc because closure is 'move ||''
+    // Using scoped threading makes everything easier wrt lifetimes and waiting for completion.
+    crossbeam::scope(|scope| {
 
-    for i in 0..THREAD_COUNT {
-        let (data, tx) = (data.clone(), tx.clone());
-        let language = lang_arc.clone();
-        thread::spawn(move || {
+        let params_arc = Arc::new(params); // using Arc because closure is 'move ||''
+        let data = Arc::new(Mutex::new(shows));
 
-            // now consume all data, competing with other threads for critical section
-            loop {
+        for i in 0..THREAD_COUNT {
 
-                // access mutex semaphore and safely take ownership of next work item
-                let option: Option<Show> = {
-                    let mut data = data.lock().unwrap();
-                    data.pop()
-                }; // mutex unlocked by scope
+            // Increment refcounts for each thread
+            let (data, params) = ( data.clone(), params_arc.clone());
+            scope.spawn(move || {
 
-                match option {
-                    Some(mut show) => {
-                        match show.create_hash() {
-                            Ok(_) => {
-                                println!("[{}] Found show {}.", i, show.file_name);
-                                match show.get_subtitles(&language) {
-                                    Ok(_) => {
-                                        println!("[{}]     Downloaded subtitles for {}.",
-                                                 i,
-                                                 show.file_name)
+                // now consume all data, competing with other threads for critical section
+                loop {
+                    // access mutex semaphore and safely take ownership of next work item
+                    let option: Option<Show> = {
+                        let mut data = data.lock().unwrap();
+                        data.pop()
+                    }; // mutex unlocked by scope
+
+                    match option {
+                        Some(mut show) => {
+                            match show.create_hash() {
+                                Ok(_) => {
+                                    println!("[{}] Found show {}.", i, show.file_name);
+                                    match show.get_subtitles(&params) {
+                                        Ok(_) => {
+                                            println!("[{}]     Downloaded subtitles for {}.",
+                                                     i, show.file_name)
+                                        }
+                                        Err(e) => println!("[{}]     {:?}.", i, e),
                                     }
-                                    Err(e) => println!("[{}]     {:?}.", i, e),
+                                }
+                                Err(e) => {
+                                    println!("[{}] Found show {}. ERROR {}: unable to read file, \
+                                              skipping.",
+                                             i, show.file_name, e)
                                 }
                             }
-                            Err(e) => {
-                                println!("[{}] Found show {}. ERROR {}: unable to read file, \
-                                          skipping.",
-                                         i,
-                                         show.file_name,
-                                         e)
-                            }
                         }
+                        None => break, // list empty, leave loop
                     }
-                    None => break, // list empty, leave loop
                 }
-            }
-
-            tx.send(()).unwrap();  // signal thread done
-        });
-    }
-
-    // wait for workers to complete (blocks if mutex is poisoned)
-    for _ in 0..THREAD_COUNT {
-        rx.recv().unwrap();
-    }
+            });
+        }
+    });
 }
 
 /// Traverse directory for valid movies
@@ -173,10 +179,25 @@ fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<S
     Ok(show_list)
 }
 
+// Username, password and search language for opensubtitles.
+struct UserParams<'a> {
+        username: &'a str,
+        password: &'a str,
+        language: &'a str,
+}
+
 fn main() {
+
+    println!("SubFinder 0.1.0\n");
+
     let language;
     let mut dir = "*".to_string();
 
+    if env::args().len() == 1 {
+        println!("Usage: SubFinder <dir/filename> <lang>. Defaulting to \"SubFinder * eng\".\n");
+    }
+
+    // Decode command line parameters
     let arg1 = env::args().nth(1).unwrap_or("*".to_string());
     if arg1.len() == 3 && !arg1.contains("*") && !arg1.contains(".") {
         language = arg1;
@@ -185,13 +206,49 @@ fn main() {
         language = env::args().nth(2).unwrap_or("eng".to_string());
     }
 
-    println!("SubFinder 0.1.0");
-    println!("Usage: SubFinder <dir/filename> <lang>. Default is \"SubFinder * eng\".");
+    // get username/password from config file, or use defaults
+    let mut username = String::new();
+    let mut password = String::new();
+
+    if let Some(mut config_path) = env::home_dir() {
+        config_path.push(CONFIG_DIR);
+        config_path.push(CONFIG_FILENAME);
+
+        use config::reader::from_file;
+
+        if config_path.as_path().exists() {
+            match from_file(config_path.as_path()) {
+                Ok(parser) => {
+                    println!("Found configuration file at {}.", config_path.display());
+
+                    if let Some(un) = parser.lookup_str(CONFIG_STR_USER) {
+                        username = un.to_string();
+                    }
+
+                    if let Some(pw) = parser.lookup_str(CONFIG_STR_PASS) {
+                        password = pw.to_string();
+                    }
+                },
+                Err(e) => {
+                        println!("Error reading config file {:?}\n", e);
+                        println!("subfinder.conf example:");
+                        println!("    username = \"auser\";");
+                        println!("    password = \"apass\";");
+                        return;
+                    },
+            }
+        } else {
+            println!("No configuration file at {}. Using empty username/password.", config_path.display());
+        }
+    }
+
     println!("Finding subtitles for {}  Language: {}.\n", dir, language);
 
     // Common file extensions for movies. Put into HashSet for O(1) lookup.
     let extensions = vec!["avi", "mp4", "m4v", "mpg", "mkv", "264", "h264", "265", "h265"];
     let valid_extensions: HashSet<&str> = extensions.into_iter().collect();
+
+    let params = UserParams { username: &username, password: &password, language: &language};
 
     match get_show_list(dir, &valid_extensions) {
         Err(e) => {
@@ -200,7 +257,7 @@ fn main() {
         }
         Ok(vec) => {
             if vec.len() > 0 {
-                run_workers(vec, language);
+                run_workers(vec, params);
             }
         }
     }

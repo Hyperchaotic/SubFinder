@@ -48,23 +48,35 @@ macro_rules! prase_response {
 }
 
 impl OpenSubtitlesClient {
-    pub fn create_client(username: &str, password: &str, lang: &str, useragent: &str)
+    pub fn create_client(username: &str,
+                         password: &str,
+                         lang: &str,
+                         useragent: &str)
                          -> Result<OpenSubtitlesClient, SubError> {
         let client = RpcClient::new(OPENSUBTITLES_SERVER);
         let mut request = Request::new("LogIn");
-        request = request.argument(&username).argument(&password).argument(&lang)
-                         .argument(&useragent).finalize();
+        request = request.argument(&username)
+            .argument(&password)
+            .argument(&lang)
+            .argument(&useragent)
+            .finalize();
 
         let resp = try!(client.remote_call(&request));
         let res: TokenResponse = prase_response!(resp.result::<TokenResponse>());
         if res.status.starts_with("200") {
-            Ok(OpenSubtitlesClient { token: res.token, client: client, })
+            Ok(OpenSubtitlesClient {
+                token: res.token,
+                client: client,
+            })
         } else {
             Err(SubError::SvrInvalidCredentials)
         }
     }
 
-    pub fn search_subtitles(&self, hash: &str, size: u64, lang: &str)
+    pub fn search_subtitles(&self,
+                            hash: &str,
+                            size: u64,
+                            lang: &str)
                             -> Result<Vec<SubtitleSearchResponse>, SubError> {
         let mut request = Request::new("SearchSubtitles");
         let size_str = size.to_string();

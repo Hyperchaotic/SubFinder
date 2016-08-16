@@ -32,7 +32,8 @@ pub fn download_to_srt(url: &str, srt_path: &str) -> Result<(), SubError> {
     // Write data to new SRT file
     if let Some(idx) = srt_idx {
         let mut srt_data = try!(zip.by_index(idx));
-        let mut out = try!(OpenOptions::new().write(true).create(true).truncate(true).open(srt_path));
+        let mut out =
+            try!(OpenOptions::new().write(true).create(true).truncate(true).open(srt_path));
         try!(io::copy(&mut srt_data, &mut out));
         return Ok(());
     }
