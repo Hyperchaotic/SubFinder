@@ -1,33 +1,10 @@
 
 // This file deals with XML-RPC, thank you https://github.com/joeyfeldberg
 
-use hyper;
-use std::io::Read;
-use xmlrpc::{Request, Response};
+use xmlrpc::{Request, Client as RpcClient};
 use error::SubError;
 
 const OPENSUBTITLES_SERVER: &'static str = "http://api.opensubtitles.org/xml-rpc";
-
-pub struct RpcClient {
-    url: String,
-}
-
-// If using this Client from xml-rpc the From<hyper::Error> conversion doesn't work in OpenSubtitlesClient.
-impl RpcClient {
-    pub fn new(s: &str) -> RpcClient {
-        RpcClient { url: s.to_string() }
-    }
-
-    pub fn remote_call(&self, request: &Request) -> Result<Response, hyper::Error> {
-        let http_client = hyper::Client::new();
-        let mut result = try!(http_client.post(&self.url).body(&request.body).send());
-
-        let mut body = String::new();
-
-        try!(result.read_to_string(&mut body));
-        Ok(Response::new(&body))
-    }
-}
 
 pub struct OpenSubtitlesClient {
     token: String,

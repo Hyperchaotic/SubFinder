@@ -53,7 +53,9 @@ impl Show {
                 }
                 for _ in 0..iterations {
                     try!(reader.read(&mut buf));
-                    unsafe { word = mem::transmute(buf); };
+                    unsafe {
+                        word = mem::transmute(buf);
+                    };
                     hash_val = hash_val.wrapping_add(word);
                 }
                 Ok(())
@@ -67,7 +69,8 @@ impl Show {
 
     // Look for and retrieve subtitle ZIP from opensubtitles.org and unpack to .SRT file.
     fn get_subtitles(&self, language: &String) -> Result<(), SubError> {
-        let client = try!(client::OpenSubtitlesClient::create_client("", "", "en", "RustSubFinder 0.1.0"));
+        let client =
+            try!(client::OpenSubtitlesClient::create_client("", "", "en", "RustSubFinder 0.1.0"));
         let subs = try!(client.search_subtitles(&self.hash, self.file_size, language));
 
         if subs.is_empty() {
@@ -111,14 +114,20 @@ fn run_workers(shows: Vec<Show>, language: String) {
                             Ok(_) => {
                                 println!("[{}] Found show {}.", i, show.file_name);
                                 match show.get_subtitles(&language) {
-                                    Ok(_) => println!("[{}]     Downloaded subtitles for {}.",
-                                                      i, show.file_name),
+                                    Ok(_) => {
+                                        println!("[{}]     Downloaded subtitles for {}.",
+                                                 i,
+                                                 show.file_name)
+                                    }
                                     Err(e) => println!("[{}]     {:?}.", i, e),
                                 }
                             }
                             Err(e) => {
-                                println!("[{}] Found show {}. ERROR {}: unable to read file, skipping.",
-                                         i, show.file_name, e)
+                                println!("[{}] Found show {}. ERROR {}: unable to read file, \
+                                          skipping.",
+                                         i,
+                                         show.file_name,
+                                         e)
                             }
                         }
                     }
@@ -146,6 +155,7 @@ fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<S
             // Only accept files big enough for hashing (error discerning file size
             // interpreted as 0 size file for discarding entry)
             let fsize = fs::metadata(&path).map(|i| i.len()).unwrap_or(0);
+
             let ext = path.extension().unwrap_or_default().to_string_lossy().into_owned();
             if valid_extensions.contains(ext.as_str()) && fsize >= HASH_BLK_SIZE {
                 if let Some(unicode_name) = path.file_name() {
@@ -168,7 +178,7 @@ fn main() {
     let mut dir = "*".to_string();
 
     let arg1 = env::args().nth(1).unwrap_or("*".to_string());
-    if arg1.len()==3 && !arg1.contains("*") && !arg1.contains(".") {
+    if arg1.len() == 3 && !arg1.contains("*") && !arg1.contains(".") {
         language = arg1;
     } else {
         dir = arg1;
@@ -180,16 +190,16 @@ fn main() {
     println!("Finding subtitles for {}  Language: {}.\n", dir, language);
 
     // Common file extensions for movies. Put into HashSet for O(1) lookup.
-    let extensions = vec!("avi", "mp4", "m4v", "mpg", "mkv", "264", "h264", "265", "h265");
+    let extensions = vec!["avi", "mp4", "m4v", "mpg", "mkv", "264", "h264", "265", "h265"];
     let valid_extensions: HashSet<&str> = extensions.into_iter().collect();
 
     match get_show_list(dir, &valid_extensions) {
         Err(e) => {
             println!("Error: {} reading directory!", e);
             return;
-        },
+        }
         Ok(vec) => {
-            if vec.len()>0 {
+            if vec.len() > 0 {
                 run_workers(vec, language);
             }
         }
