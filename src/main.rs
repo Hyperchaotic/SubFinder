@@ -186,6 +186,24 @@ struct UserParams<'a> {
         language: &'a str,
 }
 
+fn print_usage() {
+    let mut p = PathBuf::new();
+    if let Some(config_path) = env::home_dir() {
+        p = config_path;
+    }
+    p.push(CONFIG_DIR);
+    p.push(CONFIG_FILENAME);
+
+    println!("Usage: SubFinder <dir/filename> <lang>. Defaulting to \"SubFinder * eng\".\n");
+    println!("Examples: ");
+    println!("    subfinder * eng");
+    println!("    subfinder *.avi eng");
+    println!("    subfinder breakdance.avi\n");
+    println!("For opensubtitles user name and password, create a text file in {} containing:", p.display());
+    println!("    username = \"youruname\";");
+    println!("    password = \"yourpassword\";");
+}
+
 fn main() {
 
     println!("\nSubFinder 0.1.0. Subtitle search for opensubtitles.org.\n");
@@ -195,23 +213,8 @@ fn main() {
     // Decode command line parameters
     let arg1 = env::args().nth(1).unwrap_or("*".to_string());
 
-    if env::args().len() == 1 || arg1 == "-h" {
-
-        let mut p = PathBuf::new();
-        if let Some(config_path) = env::home_dir() {
-            p = config_path;
-        }
-        p.push(CONFIG_DIR);
-        p.push(CONFIG_FILENAME);
-
-        println!("Usage: SubFinder <dir/filename> <lang>. Defaulting to \"SubFinder * eng\".\n");
-        println!("Examples: ");
-        println!("    subfinder * eng");
-        println!("    subfinder *.avi eng");
-        println!("    subfinder breakdance.avi\n");
-        println!("For opensubtitles user name and password, create a text file in {} containing:", p.display());
-        println!("    username = \"auser\";");
-        println!("    password = \"apass\";");
+    if env::args().len() > 1 && arg1 == "-h" {
+        print_usage();
         return;
     } else {
         println!("Use -h for help/usage.\n");
