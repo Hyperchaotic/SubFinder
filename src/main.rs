@@ -199,7 +199,7 @@ fn print_usage() {
     println!("    subfinder * eng");
     println!("    subfinder *.avi eng");
     println!("    subfinder breakdance.avi\n");
-    println!("For opensubtitles user name and password, create a text file in {} containing:", p.display());
+    println!("For opensubtitles.org user name and password, create a text file in {} containing:", p.display());
     println!("    username = \"youruname\";");
     println!("    password = \"yourpassword\";");
 }
