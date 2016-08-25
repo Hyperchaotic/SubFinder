@@ -151,31 +151,40 @@ fn run_workers(shows: Vec<Show>, params: UserParams) {
     });
 }
 
+/// Take pathbuf and if it matches the criteria; put it into the show list.
+fn process_pathbuf(path: &PathBuf, valid_extensions: &HashSet<&str>, show_list: &mut Vec<Show>) {
+    // Only accept files big enough for hashing (error discerning file size
+    // interpreted as 0 size file for discarding entry)
+    let fsize = fs::metadata(&path).map(|i| i.len()).unwrap_or(0);
+
+    let ext = path.extension().unwrap_or_default().to_string_lossy().into_owned();
+    if valid_extensions.contains(ext.as_str()) && fsize >= HASH_BLK_SIZE {
+        if let Some(unicode_name) = path.file_name() {
+            show_list.push(Show {
+                full_path: path.to_string_lossy().into_owned(),
+                file_name: unicode_name.to_string_lossy().into_owned(),
+                file_size: fsize,
+                hash: String::new(),
+            });
+        }
+    }
+}
+
 /// Traverse directory for valid movies
 fn get_show_list(path: String, valid_extensions: &HashSet<&str>) -> Result<Vec<Show>, SubError> {
 
     let mut show_list: Vec<Show> = Vec::new();
     for entry in try!(glob(&path)) {
         if let Ok(path) = entry {
-
-            // Only accept files big enough for hashing (error discerning file size
-            // interpreted as 0 size file for discarding entry)
-            let fsize = fs::metadata(&path).map(|i| i.len()).unwrap_or(0);
-
-            let ext = path.extension().unwrap_or_default().to_string_lossy().into_owned();
-            if valid_extensions.contains(ext.as_str()) && fsize >= HASH_BLK_SIZE {
-                if let Some(unicode_name) = path.file_name() {
-                    show_list.push(Show {
-                        full_path: path.to_string_lossy().into_owned(),
-                        file_name: unicode_name.to_string_lossy().into_owned(),
-                        file_size: fsize,
-                        hash: String::new(),
-                    });
-                }
-            }
+            process_pathbuf(&path, &valid_extensions, &mut show_list);
         }
     }
-
+    // Glob found nothing, see if it's a single file
+    if show_list.is_empty() {
+        use std::path::PathBuf;
+        let file = PathBuf::from(&path);
+        process_pathbuf(&file, &valid_extensions, &mut show_list);
+    }
     Ok(show_list)
 }
 
@@ -279,6 +288,8 @@ fn main() {
         Ok(vec) => {
             if vec.len() > 0 {
                 run_workers(vec, params);
+            } else {
+                println!("No valid files found.");
             }
         }
     }
